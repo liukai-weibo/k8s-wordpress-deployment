@@ -1,0 +1,68 @@
+# 1. 为 WordPress 文件 (主题、插件、上传等) 准备的持久化存储声明 (PVC)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wp-pv-claim
+spec:
+  storageClassName: standard # 同样使用 minikube 默认的 StorageClass
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi # 为 WordPress 文件申请 2GB 的空间
+---
+# 2. 定义 WordPress 的 Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wordpress
+      tier: frontend
+  template:
+    metadata:
+      labels:
+        app: wordpress
+        tier: frontend
+    spec:
+      containers:
+      - image: wordpress:latest
+        name: wordpress
+        imagePullPolicy: IfNotPresent # 使用我们已加载的本地镜像
+        env:
+        - name: WORDPRESS_DB_HOST
+          value: mysql-service # 这是关键！它直接使用我们为MySQL创建的Service的名称
+        - name: WORDPRESS_DB_USER
+          value: wordpressuser # 为简单起见，我们直接使用root用户
+        - name: WORDPRESS_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-pass-secret # 从我们之前创建的Secret中获取密码
+              key: user_password
+        ports:
+        - containerPort: 80
+          name: wordpress
+        volumeMounts:
+        - name: wordpress-persistent-storage
+          mountPath: /var/www/html
+      volumes:
+      - name: wordpress-persistent-storage
+        persistentVolumeClaim:
+          claimName: wp-pv-claim # 使用我们为WordPress新创建的PVC
+---
+# 3. 定义让外部可以访问 WordPress 的 Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress-service
+spec:
+  selector:
+    app: wordpress
+    tier: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+  type: NodePort # 我们先用 NodePort 的方式来暴露服务，方便测试
